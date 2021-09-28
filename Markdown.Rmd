@@ -1,0 +1,550 @@
+---
+title: "Covid Cases Forecast"
+author: "Steffen Wohlers, Michelle Michalowski , Johanna Andrango Brito, Ioanna Lamprou"
+date: "8/7/2021"
+output:
+ prettydoc::html_pretty:
+    theme: "flatly"
+    highlight: github
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Introduction ##
+<div style="text-align: justify">
+
+This Markdown was created as part of the Group Assignment of the elective course "Advanced R" at the Masters of Business Analytics and Big Data of the IE University. 
+
+The dataset used was found in the kaggle competition accessible below: https://www.kaggle.com/c/covid19-global-forecasting-week-4/data?select=train.csv
+
+Made up from  35995 rows and 6 Columns, the specific Dataset contains information about the aggregated number of confirmed Covid-19 cases as well as the number of resulting fatalities, in various locations across the world.
+
+The data was collected the period between the 22nd of January and the 15th of May 2020.
+
+The goal was to analyze the data, find hidden patterns and use time series and Machine Learning Models to predict future cases and fatalities. 
+
+*Note*: Additional Datasets were used in order to enrich the initial one and gain more information.
+1) Weather Data (URL:https://www.kaggle.com/davidbnn92/weather-data/data?scriptVersionId=30695168)
+2) Information about the Health spending levels per country (URL: https://www.kaggle.com/danevans/world-bank-wdi-212-health-systems)
+
+The contents is structured as follows:
+
+* Exploratory Data Analysis of Covid Cases data set and quick look into external data
+
+* Shiny Application displaying our findings in a dynamic way
+
+* Forecasting Cases and Fatalities
+
+* Predictions with Machine Learning Models
+
+## Covid Data Set ##
+
+The initial Dataset was made up from 201940 rows and 6 columns. 
+
+The Maximum Confirmed Cases that were marked were 345813 in New York on the 15th of May 2020, while there were days with 0 Confirmed cases in some countries. The Average number of confirmed cases on that period is 4936.738 per day.
+
+As far as it concerns the Fatalities due to Covid-19, the Maximum Number was 33998 deaths on the 15th of May 2020 in the UK.There were days that some countries did not have any deaths that were related to Covid-19 However, on average, each day around 359 people(353.8) died from Covid-19.
+
+To get a quick overview of how the data set actually looks like, please refer to the table below:
+
+```{r, echo=FALSE, results='asis', warning=FALSE}
+library(knitr)
+df <- read.csv("./data/train.csv", 
+               header = TRUE,
+               na.strings=c("","NA"), # na.strings: make sure NAs are not read as empty strings
+               sep = ",")
+df$Date <- as.Date(df$Date, "%Y-%m-%d")
+
+library(DT)
+library(data.table)
+datatable(df, options = list(
+  searching = TRUE,
+  pageLength = 5,
+  lengthMenu = c(5, 10, 15, 20)
+))
+```
+
+All in all, the data set is very complete with only missing values in the Province State as can be seen below:
+
+```{r, echo=FALSE}
+kable(sapply(df, function(x) sum(is.na(x))), caption = "Missing values")
+```
+
+### Aggregated results
+
+In order to find Aggregated Results we followed two approaches that we found were important. The first one was by Countries in order to see how each country was affected and which countries were affected the most. The second approach concerned the dates as it is important to see how the pandemic evolved through time.
+
+* Aggregated Cases per country:
+
+```{r Cases per country , echo= FALSE, message=FALSE}
+# Aggregated Results per country - Cases
+# Cases 
+
+library(dplyr)
+library(DT)
+library(data.table)
+
+cases_per_country <- df %>% 
+  group_by(Country_Region) %>% 
+  summarise(cases_max  = max(ConfirmedCases, na.rm = T),
+            cases_min  = min(ConfirmedCases, na.rm = T),
+            cases_mean = mean(ConfirmedCases,  na.rm = T),
+            cases_sum = sum(ConfirmedCases,  na.rm = T))
+
+datatable(cases_per_country, options = list(
+  searching = TRUE,
+  pageLength = 5,
+  lengthMenu = c(5, 10, 15, 20)
+))
+
+```
+
+* Aggregated Cases per date:
+
+```{r, echo= FALSE, message=FALSE}
+library(DT)
+library(data.table)
+cases_per_date <- df %>% 
+  group_by(Date) %>% 
+  summarise(cases_max  = max(ConfirmedCases, na.rm = T),
+            cases_min  = min(ConfirmedCases, na.rm = T),
+            cases_sum  = sum(ConfirmedCases, na.rm = T),
+            cases_mean = mean(ConfirmedCases,  na.rm = T)) 
+
+datatable(cases_per_date, options = list(
+  searching = TRUE,
+  pageLength = 5,
+  lengthMenu = c(5, 10, 15, 20)
+))
+```
+
+* Aggregated Fatalities per Date:
+
+```{r, echo=FALSE, message =FALSE}
+library(DT)
+library(data.table)
+fatality_per_date <- df %>% 
+  group_by(Date) %>% 
+  summarise(deaths_max  = max(Fatalities, na.rm = T),
+            deaths_min  = min(Fatalities, na.rm = T),
+            deaths_sum  = sum(Fatalities, na.rm = T),
+            deaths_mean = mean(Fatalities,  na.rm = T))
+
+datatable(fatality_per_date, options = list(
+  searching = TRUE,
+  pageLength = 5,
+  lengthMenu = c(5, 10, 15, 20)
+))
+```
+
+* Aggregated Fatalities per Country:
+
+```{r, echo=FALSE, message =FALSE}
+library(DT)
+library(data.table)
+fatality_per_country <- df %>% 
+  group_by(Country_Region) %>% 
+  summarise(deaths_max  = max(Fatalities, na.rm = T),
+            deaths_min  = min(Fatalities, na.rm = T),
+            deaths_sum  = sum(Fatalities, na.rm = T),
+            deaths_mean = mean(Fatalities,  na.rm = T))
+
+datatable(fatality_per_country, options = list(
+  searching = TRUE,
+  pageLength = 5,
+  lengthMenu = c(5, 10, 15, 20)
+))
+```
+
+Now let's look into those countries with the most extreme values 
+
+```{r, echo=FALSE, warning=FALSE}
+# Country with the most cases recorded
+max_sum_cases_countries <-  cases_per_country[which.max(cases_per_country$cases_sum), c("Country_Region","cases_max")]
+
+
+# Country with the least cases recorded
+min_sum_cases_countries <-  cases_per_country[which.min(cases_per_country$cases_sum), c("Country_Region","cases_sum")]
+
+# Country with the most fatalities recorded
+max_sum_deaths_countries <-  fatality_per_country[which.max(fatality_per_country$deaths_max), c("Country_Region","deaths_max")]
+
+# Country with the least cases recorded
+min_sum_deaths_countries <-  fatality_per_country[which.min(fatality_per_country$deaths_sum), c("Country_Region","deaths_sum")]
+
+kable(max_sum_cases_countries, caption = "Country with the most cases")
+kable(min_sum_cases_countries, caption = "Country with the least cases")
+kable(max_sum_deaths_countries, caption = "Country with the most deaths")
+kable(min_sum_deaths_countries, caption = "Country with the least deaths")
+
+
+
+```
+The country with both the most recorded cases overall and the most deaths due to Covid-19 was the US, while the country with the least recorded cases was Western Sahara with 232 recorded cases in the period of the Dataset, and the country with the least deaths was Bhutan, with no recorded Covid-19 related deaths. Let's not forget that the size of each country affects the number of cases and fatalities.
+
+Finally, we were also looking for seasonality. As we dont have data over a long period (e.g. one year) and only for 5 months, there was no ppssibility to account for monthly or season seasonality. But still, we tried to detect the overall trend during the weeks aggregated and came to the following result:
+
+```{r, echo = FALSE, warning=FALSE}
+library(ggplot2)
+
+total_per_date <- df %>%
+   mutate(Date = as.Date(Date),
+          weekday = weekdays(Date)) %>%
+   group_by(weekday) %>%
+   summarise(Cases = sum(ConfirmedCases),
+             Deaths = sum(Fatalities))
+na.omit(total_per_date)
+# Plotting the evolution of cases and deaths through time
+total_per_date$weekday <- factor(total_per_date$weekday, levels= c("Sunday", "Monday", 
+    "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"))
+
+total_per_date[order(total_per_date$weekday), ]
+na.omit(total_per_date)
+ggplot(data=total_per_date, aes(x=weekday, y=Cases)) +
+  geom_bar(stat="identity", color = "darkgreen", fill = "darkgreen")
+ggplot(data=total_per_date, aes(x=weekday, y=Deaths)) +
+  geom_bar(stat="identity", color = "darkgreen", fill = "darkgreen")
+
+```
+As can be seen here, there is a clear trend of some weekdays showing more confirmed cases than others. Especially on the weekends, there were less cases confirmed. This is obviously due to the fact that on the weekend less people are getting tested. 
+
+## Shiny App ##
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE}
+library(leaflet)
+library(rgdal)
+library(sp)
+
+# Copy initial df for mapping purposes
+df_map <- df
+
+# --- Health system ---
+# Change name for proper merging
+df_map[df_map$Country_Region == "US",]$Country_Region <- "United States of America"
+
+df_health_system <- read.csv("./data/health_system.csv", 
+                             header = TRUE,
+                             na.strings=c("","NA"), # na.strings: make sure NAs are not read as empty strings
+                             sep = ",")
+df_health_system <- subset(df_health_system, select = -c(Province_State))
+df_health_system <- df_health_system %>% distinct(Country_Region, .keep_all = TRUE)
+df_map_health <- left_join(df_map, df_health_system, by = c("Country_Region"="Country_Region"))
+
+# Aggregate values by country
+df_map_health <- df_map_health %>%
+  select(-c(Id, Province_State, World_Bank_Name)) %>%
+  group_by(Country_Region) %>%
+  summarize( exp_gdp = max(Health_exp_pct_GDP_2016,na.rm = TRUE),
+             exp_ppc = max(per_capita_exp_PPP_2016, na.rm = TRUE))
+
+# Clean infinite values
+df_map_health <- do.call(data.frame, lapply(df_map_health, function(x) replace(x, is.infinite(x), NA)))
+
+# Read countries geo data
+countries <- readOGR("https://raw.githubusercontent.com/eparker12/nCoV_tracker/master/input_data/countries.geojson")
+
+# Merge dataframe with geo data
+df_map_health <- sp::merge(x = countries, y = df_map_health, by.x ="ADMIN", by.y ="Country_Region",duplicateGeoms = TRUE)
+
+
+# Define color palette
+pal_gdp <- colorNumeric(
+  palette = c("green", "yellow","red"),
+  domain = df_map_health$exp_gdp)
+
+# --- Cases ---
+df_map_cases <- df_map
+
+
+df_locations <- read.csv("./data/misc_data.csv",
+               header = TRUE,
+               na.strings=c("","NA"), # na.strings: make sure NAs are not read as empty strings
+               sep = ",")
+
+df_locations <- df_locations %>% select(Country.Region, lat, long)
+df_locations <- df_locations %>% distinct(Country.Region, .keep_all = TRUE)
+
+df_map_cases <- left_join(df_map_cases, df_locations, by = c("Country_Region"="Country.Region"))
+
+df_map_cases <- df_map_cases %>% 
+  select(Country_Region, Date, ConfirmedCases, long, lat) %>%
+  group_by(Date, Country_Region) %>%
+  summarise(cases_total = sum(ConfirmedCases),
+            long = max(long),
+            lat = max(lat))
+
+df_map_cases <- as_data_frame(df_map_cases)
+
+df_map_cases$day <- as.numeric(df_map_cases$Date - min(df_map_cases$Date))
+```
+
+Following our Shiny App to better describe the evolution of the cases/fatalities:
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+library(shiny)
+library(shinyWidgets)
+library(plotly)
+library(shiny)
+library(data.table)
+library(dplyr)
+library(ggplot2)
+library(plotly)
+library(shinydashboard)
+
+shinyApp(
+  ui = fluidPage(
+    
+    setBackgroundColor(
+        color = "ghostwhite",
+        gradient = c("linear", "radial"),
+        direction = c("bottom", "top", "right", "left"),
+        shinydashboard = FALSE
+    ),
+
+    # Application title
+    HTML("<br>"),
+    titlePanel("Covid Development Shiny App"),
+    HTML("<br><br>"),
+
+        # Show a plot of the generated distribution
+        mainPanel(
+            tabsetPanel(
+                tabPanel("Data Table ", h3("Data overview"),
+                         HTML("<br>"),
+                         sidebarPanel(h3("Please filter"),
+                                          dateInput("date_input",
+                                                    "Select Date:",
+                                                    value = max(df$Date),
+                                                    min =  min(df$Date),
+                                                    max = max(df$Date)),
+                                          selectInput("country_input",
+                                                      "Select Country:",
+                                                      choices = unique(df$Country_Region),
+                                                      selected  = "Germany",
+                                                      multiple = TRUE),
+                                          sliderInput("cases_input",
+                                                      "Select range of cases per day:",
+                                                      min = min(df$ConfirmedCases),
+                                                      max = max(df$ConfirmedCases),
+                                                      value = c(min(df$ConfirmedCases), max(df$ConfirmedCases)))),
+                         mainPanel(
+                         h3("The underlying data"),
+                         DT::dataTableOutput('filteredTable', height = "500px"))),
+                tabPanel("Cases Aggregated", h3("Cases/Fatalities aggregated per Date"), 
+                         
+                         HTML("<br>"),
+                         sidebarPanel(h3("Please filter"),
+                                        selectInput("country_input_2",
+                                                   "Select Country:",
+                                                   choices = unique(df$Country_Region),
+                                                   selected  = "Germany",
+                                                   multiple = FALSE),
+                                        dateRangeInput("date_range_input",
+                                                       "Select date range input:",
+                                                       start = min(df$Date),
+                                                       end = max(df$Date),
+                                                       min = min(df$Date),
+                                                       max = max(df$Date)
+                                                       )),
+                         mainPanel(fluidRow(
+                             shinydashboard::valueBoxOutput("vbox1"),
+                             shinydashboard::valueBoxOutput("vbox2")),
+                             plotlyOutput("plot_1"))
+            ),
+            tabPanel("Country Comparison", h3("Cases Comparison"),
+                     HTML("<br>"),
+                     sidebarPanel(h3("Please filter"),
+                         selectInput("country_comp",
+                                     "Select countries:",
+                                     choices = unique(df$Country_Region),
+                                     selected  = "Germany",
+                                     multiple = TRUE
+                         ),
+                         dateRangeInput("date_range_input_comp",
+                                        "Select date range input:",
+                                        start = min(df$Date),
+                                        end = max(df$Date),
+                                        min = min(df$Date),
+                                        max = max(df$Date)
+                         )
+                     ),
+                     mainPanel(fluidRow(
+                         h3("Cases"),
+                         plotlyOutput("cases_comp"),
+                         h3("Fatalities"),
+                         plotlyOutput("fatalities_comp")
+                     ))
+            ),
+            tabPanel("World Health Expenditures", h3("Percentage Health System Expenditures on GDP"),
+                     HTML("<br>"),
+                     mainPanel(fluidRow(
+                         h3("World Map"),
+                         "This world map describes the evel of current health expenditure expressed as a percentage of GDP. Estimates of current health expenditures include healthcare goods and services consumed during each year. This indicator does not include capital health expenditures such as buildings, machinery, IT and stocks of vaccines for emergency or outbreaks.",
+                         leafletOutput("health_system_map")
+                     ))
+            ),
+            tabPanel("Hot Spot Development",h3("Hot Spot Development"),
+            mainPanel(fluidRow(
+                "This map shows the hot spot development over time.",
+                HTML("<br>"),
+                sliderInput("integer", 
+                            "Days since first reported case as of January 22, 2020:",
+                            ticks = FALSE, 
+                            min = min(df_map_cases$day), 
+                            max = max(df_map_cases$day), 
+                            value = 2, 
+                            step = 1,
+                            animate = animationOptions(interval = 1000, loop = TRUE)
+                ),
+                leafletOutput("health_system_map_2")
+            ))
+            )
+        )
+    )
+  ),
+  
+  
+  server = function(input, output) {
+    
+    df_filtered<-reactive({
+        df %>% filter(Date == input$date_input,
+                      Country_Region %in% input$country_input)
+    })
+    
+    df_cases_date<-reactive({ 
+        cases_per_date <- df %>% 
+            filter(Country_Region %in% input$country_input_2,
+                   Date >= input$date_range_input[1],
+                   Date <= input$date_range_input[2]) %>%
+            mutate(Date = as.Date(Date)) %>%
+            group_by(Date) %>% 
+            summarise(cases_mean = mean(ConfirmedCases,  na.rm = T),
+                      fatalities_mean = mean(Fatalities,  na.rm = T))
+    })
+    
+    df_cases_comp<-reactive({
+        cases_comp <- df %>% 
+            filter(Country_Region %in% input$country_comp,
+                   Date >= input$date_range_input_comp[1],
+                   Date <= input$date_range_input_comp[2]) %>%
+            mutate(Date = as.Date(Date)) %>%
+            group_by(Date) %>% 
+            group_by(Date, Country_Region) %>%
+            summarize(cases_total = sum(ConfirmedCases))
+    })
+    
+    
+    df_fatalities_comp<-reactive({
+        fatalities_comp <- df %>% 
+            filter(Country_Region %in% input$country_comp,
+                   Date >= input$date_range_input_comp[1],
+                   Date <= input$date_range_input_comp[2]) %>%
+            mutate(Date = as.Date(Date)) %>%
+            group_by(Date) %>% 
+            group_by(Date, Country_Region) %>%
+            summarize(fatalities_total = sum(Fatalities))
+    })
+    
+    df_map_cases_func <-reactive({
+        df_map_cases %>% filter(day == input$integer)
+    })
+    
+    
+    output$filteredTable <- DT::renderDataTable({
+        data.table(
+            df_filtered()
+        )
+    })
+    
+    output$plot_1<-renderPlotly({
+            ggplot(df_cases_date()) +
+                geom_line(aes(x=Date,y=cases_mean), colour='darkblue') + 
+                geom_line(aes(x=Date,y=fatalities_mean), colour='red') +
+                scale_x_date(date_breaks = "1 month", date_minor_breaks = "1 week",
+                         date_labels = "%B") +
+                theme_minimal()
+    })
+    
+    
+
+    output$cases_comp<-renderPlotly({
+        ggplot(df_cases_comp(), aes(x=Date, y=cases_total, group=Country_Region, color=Country_Region)) + geom_line() + theme_minimal()
+    })
+    
+    
+    output$fatalities_comp<-renderPlotly({
+        ggplot(df_fatalities_comp(), aes(x=Date, y=fatalities_total, group=Country_Region, color=Country_Region)) + geom_line() + theme_minimal()
+    })
+    
+    
+    output$health_system_map <- renderLeaflet({
+        leaflet(data = df_map_health) %>%
+            addTiles() %>%
+            addPolygons(color = "black",
+                        fillColor = ~pal_gdp(exp_gdp),
+                        smoothFactor = 0.2,
+                        fillOpacity = 0.8,
+                        popup =paste("Country:", df_map_health$ADMIN, "<br>", 
+                                     "Expenditure in %:", df_map_health$exp_gdp)
+            )
+    })
+    
+    output$health_system_map_2 <- renderLeaflet({
+        leaflet(data = df_map_health) %>%
+            addTiles()
+
+    })
+    
+    observe({
+        leafletProxy("health_system_map_2", data = df_map_cases_func()) %>%
+            clearMarkers() %>%
+            addCircleMarkers(lng = ~long,
+                             lat = ~lat,
+                             radius = ~cases_total / 10000)
+        
+    })
+    
+    df_vbox<-reactive({
+        df_vbox_2 <- df %>% 
+            filter(Country_Region %in% input$country_input_2,
+                   Date >= input$date_range_input[1],
+                   Date <= input$date_range_input[2])
+
+    })
+    
+
+    output$vbox1 <- renderValueBox({
+        valueBox(
+            value = paste(format(sum(df_vbox()$ConfirmedCases), big.mark = ","), "", sep = " "),
+            subtitle = "Total Cases", icon("cog", lib = "glyphicon"),
+            color = "purple")
+    })
+    
+    output$vbox2 <- renderValueBox({
+        valueBox(
+           value = paste(format(sum(df_vbox()$Fatalities, na.rm = TRUE), big.mark = ","), " (",
+                         round(100 * sum(df_vbox()$Fatalities, na.rm = TRUE) / sum(df_vbox()$ConfirmedCases), 1),
+                          "%)",
+                         sep = ""
+            ),
+            subtitle = "deaths in total vs %", icon("stats",lib='glyphicon')
+       )
+    })
+    
+}
+)
+```
+
+## ARIMA ##
+
+As we are dealing with time series data and the granularity of data differs per unit (for some countries we have regions and for others just the country) we created a unique identifier (Area). In order to deal with time series of different Areas, we needed to nest each area and create an arima model for each of them. We created two models: one for covid confirmed cases and another one for fatalities. After creating these models, we mapped them and we forecasted 43 periods ahead. 
+
+## ML Model ##
+
+In the builing process of the Machine Learning model, we actually dealt with the same problem. Here again, we made use of nesting and mapping in order to be able to predict for each Area. In the end, after having tried linear regression and random forest we decided to focus on Random Forest. What is also worth mentioning here, is that initally we tried to add external data but it was very hard to find data for all dates and regions used in our orginial data set. That's why we decided to only use week and weekday. 
+
+
+
+</div>
